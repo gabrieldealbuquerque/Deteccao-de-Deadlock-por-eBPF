@@ -1,0 +1,16 @@
+# Compilação local das apps (também usada no Docker).
+CC ?= gcc
+CFLAGS ?= -O2 -Wall -Wextra
+
+.PHONY: all clean
+
+all: app_a app_b
+
+app_a: app_a.c
+	$(CC) $(CFLAGS) -o $@ app_a.c
+
+app_b: app_b.c
+	$(CC) $(CFLAGS) -o $@ app_b.c
+
+clean:
+	rm -f app_a app_b

@@ -1,0 +1,35 @@
+services:
+  app_a:
+    build: .
+    image: mission-control-app:latest
+    container_name: mc_app_a
+    command: ["/opt/mission/app_a"]
+    networks:
+      mission_control_net:
+        ipv4_address: 172.28.0.2
+    environment:
+      PEER_IP: "172.28.0.3"
+    restart: "no"
+
+  app_b:
+    build: .
+    image: mission-control-app:latest
+    container_name: mc_app_b
+    command: ["/opt/mission/app_b"]
+    networks:
+      mission_control_net:
+        ipv4_address: 172.28.0.3
+    environment:
+      PEER_IP: "172.28.0.2"
+    depends_on:
+      - app_a
+    restart: "no"
+
+networks:
+  mission_control_net:
+    name: mission_control_net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
