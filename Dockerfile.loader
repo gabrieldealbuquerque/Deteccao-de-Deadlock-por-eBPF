@@ -1,0 +1,24 @@
+ARG WSL_FLAG=0
+
+# --- Configuração 0: Linux Nativo (Ubuntu 22.04) ---
+FROM ubuntu:22.04 AS builder-0
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	clang llvm make gcc libc6-dev pkg-config libbpf-dev libelf-dev zlib1g-dev \
+	linux-tools-common linux-tools-generic ca-certificates \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
+
+# --- Configuração 1: Windows WSL2 (Debian Bookworm) ---
+FROM debian:bookworm-slim AS builder-1
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	clang llvm make gcc libc6-dev pkg-config libbpf-dev libelf-dev zlib1g-dev \
+	bpftool ca-certificates \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
+
+# --- Estágio Final ---
+FROM builder-${WSL_FLAG}
+WORKDIR /opt/mission
+CMD ["tail", "-f", "/dev/null"]

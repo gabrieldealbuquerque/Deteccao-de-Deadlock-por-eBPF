@@ -3,15 +3,20 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-#include <linux/in.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/tcp.h>
-#include <linux/pkt_cls.h>
+
+/* Macros de rede que o vmlinux.h não exporta (pois BTF não lê #define) */
+#ifndef TC_ACT_OK
+#define TC_ACT_OK 0
+#endif
+
+#ifndef ETH_P_IP
+#define ETH_P_IP 0x0800
+#endif
 
 #ifndef IP_MF
 #define IP_MF 0x2000
 #endif
+
 #ifndef IP_OFFSET
 #define IP_OFFSET 0x1fff
 #endif
@@ -45,6 +50,7 @@ struct event {
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
+	__type(key, __u32);             /* <-- ADICIONE ESTA LINHA! */
 	__type(value, struct cfg_ips);
 } cfg_map SEC(".maps");
 

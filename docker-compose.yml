@@ -1,7 +1,6 @@
 services:
   app_a:
     build: .
-    image: mission-control-app:latest
     container_name: mc_app_a
     command: ["/opt/mission/app_a"]
     networks:
@@ -13,7 +12,6 @@ services:
 
   app_b:
     build: .
-    image: mission-control-app:latest
     container_name: mc_app_b
     command: ["/opt/mission/app_b"]
     networks:
@@ -23,6 +21,27 @@ services:
       PEER_IP: "172.28.0.2"
     depends_on:
       - app_a
+    restart: "no"
+
+  ebpf_loader:
+    build:
+      context: .
+      dockerfile: Dockerfile.loader
+      args:
+        WSL_FLAG: 1
+    image: mission-control-loader:latest
+    container_name: ebpf_loader
+    privileged: true
+    network_mode: host
+    pid: host
+    depends_on:
+      - app_a
+      - app_b
+    volumes:
+      - ./:/opt/mission
+      - /sys/kernel/btf/vmlinux:/sys/kernel/btf/vmlinux:ro
+      - /sys/fs/bpf:/sys/fs/bpf
+      - /sys/kernel/debug:/sys/kernel/debug:ro
     restart: "no"
 
 networks:

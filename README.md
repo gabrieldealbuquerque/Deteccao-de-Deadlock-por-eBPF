@@ -18,48 +18,47 @@ O *userspace* se comunica com o kernel pela **libbpf**: o `bpftool` gera o skele
 | `app_a.c` / `app_b.c` | Servidores TCP (portas 8081 e 8082) e clientes do par; lógica de impasse; `SO_KEEPALIVE` e intervalos curtos para existir tráfego periódico (keepalives) na ponte; sem isso o TC quase não “vê” o tempo passar. |
 | `deadlock_bpf.c` | Programa eBPF de tipo *scheduler* TC, seção `SEC("tc")`. Usa `vmlinux.h` (BTF do kernel), mapas (array de configuração, hash de estado, ring buffer) e helpers padrão (`bpf_l4_csum_replace`, `bpf_ringbuf_output`, `bpf_map_*`, `bpf_ktime_get_ns`, etc.). |
 | `loader.c` | Carrega o *object* via skeleton `deadlock_bpf.skel.h`, preenche os IPs do par, cria o *hook* TC *ingress* na interface `br-*` da rede Docker, faz *poll* do ring buffer e trata sinais para *detach* e limpeza. |
-| `docker-compose.yml` + `Dockerfile` | Dois containers com IPs fixos na faixa 172.28.0.0/16, rede *bridge* dedicada, sem simulação falsa de rede. |
-| `mission_control_lab.ipynb` | Células *shell* para compilar, subir os containers, rodar o loader e inspecionar logs. |
+| `docker-compose.yml` + `Dockerfile` | Apps em dois containers na faixa 172.28.0.0/16 (`mission_control_net`). |
+| `Dockerfile.loader` | Imagem Ubuntu 22.04 com `clang`, `llvm`, `bpftool`, `libbpf-dev`, etc.; o serviço `ebpf_loader` monta o projeto em `/opt/mission`, usa `privileged`, `network_mode: host`, `pid: host` e volumes para BTF, `/sys/fs/bpf` e `/sys/kernel/debug`, e roda `make` / `./loader` no kernel do host. |
+| `mission_control_lab.ipynb` | Fluxo com `docker compose` e `docker exec ebpf_loader …` (sem toolchain no host). |
 
-O Makefile do host organiza isso: gera `vmlinux.h` a partir de `/sys/kernel/btf/vmlinux`, compila `deadlock_bpf.c` → `deadlock_bpf.o` com `clang` (*target bpf*), e roda `bpftool gen skeleton` para o `.skel.h`. Na **linkagem** do *loader* entram ainda **libelf** e **zlib** (além do que o `pkg-config` da libbpf trouxer).
+O `Makefile` gera `vmlinux.h` a partir de `/sys/kernel/btf/vmlinux`, compila `deadlock_bpf.c` → `deadlock_bpf.o` com `clang` (*target bpf*), roda `bpftool gen skeleton` e linka o *loader* com **libbpf**, **libelf** e **zlib**. Isso pode rodar no host (se você tiver as ferramentas) ou **dentro** do container `ebpf_loader`, que é o caminho documentado no notebook.
 
-## Dependências (máquina host Linux)
+## Dependências
 
-- **Kernel** com BTF acessível (`/sys/kernel/btf/vmlinux` é o padrão no `Makefile`). Sem BTF não dá para seguir o fluxo *vmlinux.h* + skeleton do jeito que o repo está hoje.
-- **clang** e **LLVM** (*toolchain* com *target* `bpf`).
-- **bpftool** (às vezes no pacote `linux-tools` ou equivalente).
-- **libbpf** em versão de desenvolvimento, com arquivos de cabeçalho e `.pc` para `pkg-config` (em muitas distros: `libbpf-dev`).
-- **elfutils** (libelf) e **zlib** (link `-lelf -lz`, como no `Makefile` após o `pkg-config` da libbpf).
-- **GNU make**, **gcc** (apps e *loader*).
-- **Docker** e **docker compose** para a parte dos containers.
+**No host (Linux):** Docker / Docker Compose e kernel com BTF em `/sys/kernel/btf/vmlinux` (montado no `ebpf_loader` como somente leitura). Não é obrigatório instalar `clang`, `llvm` ou `bpftool` no host se você usar só o fluxo com `ebpf_loader`.
 
-Dentro dos containers basta a imagem base (Debian no `Dockerfile`) com `gcc` e *glibc* para as duas aplicações.
+**Na imagem `Dockerfile.loader`:** `clang`, `llvm`, `make`, `gcc`, `pkg-config`, `libbpf-dev`, `libelf-dev`, `zlib1g-dev`, `bpftool`, `linux-tools-common`, `linux-tools-generic`.
+
+**Na imagem das apps (`Dockerfile`):** `gcc` e *glibc* (Debian) para compilar `app_a` e `app_b`.
 
 ## Compilação
 
+Fluxo recomendado (tudo via Compose + `ebpf_loader`):
+
 ```bash
-make         # vmlinux.h, deadlock_bpf.o, skeleton, binário loader, app_a e app_b
-# ou só as apps
-make -f Makefile.apps
+docker compose up -d --build
+docker exec ebpf_loader sh -c 'cd /opt/mission && make clean 2>/dev/null; make all'
 ```
 
-Imagem Docker (só com as *apps*):
+No próprio host (opcional), se as ferramentas estiverem instaladas:
 
 ```bash
-docker compose build
+make
+make -f Makefile.apps   # só as apps
 ```
 
 ## Execução (resumido)
 
-1. Subir os serviços: `docker compose up -d` (a partir do diretório com `docker-compose.yml`).
+1. `docker compose up -d` — sobe `mc_app_a`, `mc_app_b` e o `ebpf_loader` (este fica em `tail -f /dev/null` até você usar `docker exec`).
 
-2. Identificar a ponte (ex.: `br-` + primeiros 12 hex do ID da rede) ou deixar o `loader` tentar uma interface `br-*` cujo endereço caia em 172.28.0.0/16.
+2. `docker exec ebpf_loader sh -c 'cd /opt/mission && make all'` — gera o skeleton e o binário `loader` (artefatos também aparecem no diretório do projeto no host).
 
-3. O *loader* precisa de **privilégios elevados** (e, em muitas máquinas, limite de memória bloqueada; o `loader.c` ajusta `RLIMIT_MEMLOCK` para o máximo, como em vários exemplos de libbpf).
+3. Ponte Docker: `br-` + primeiros 12 caracteres hex do ID da rede `mission_control_net` (o loader com `network_mode: host` enxerga essa interface no kernel do host).
 
-4. O notebook `mission_control_lab.ipynb` acompanha esses passos; o ideal é abri-lo com o diretório de trabalho na pasta do projeto (onde estão o `Makefile` e o `docker-compose.yml`).
+4. `docker exec ebpf_loader sh -c 'cd /opt/mission && ./loader br-<id>'` — roda como root no container privilegiado; não precisa de `sudo` no host. O `loader.c` continua ajustando `RLIMIT_MEMLOCK`.
 
-5. O loader imprime a linha pedida no enunciado quando o ring buffer recebe o evento de *deadlock*.
+5. O notebook `mission_control_lab.ipynb` segue esses passos. O loader imprime a linha do enunciado quando o ring buffer recebe o evento de *deadlock*.
 
 ## Notas e limitações
 
@@ -69,7 +68,7 @@ docker compose build
 
 - No **WSL2**, Docker e a ponte podem se comportar de forma diferente de um Linux nativo; a interface *br-* que o eBPF enxerga no host tem que ser a certa.
 
-- **Permissões**: carregar eBPF, criar o *qdisc* TC e o anexo `bpf_tc_*` exige *capabilities* adequadas com `sudo` — ou o modo *rootless* configurado, o que a maioria dos cursos não cobre.
+- **Permissões**: com o fluxo `ebpf_loader` (`privileged: true`, `pid: host`, `network_mode: host`), o `make` e o `./loader` rodam como root dentro do container, no **mesmo kernel** do host — não é preciso `sudo` no host para o loader. Se você compilar e rodar o loader direto no host, aí sim costuma precisar de privilégios elevados e `RLIMIT_MEMLOCK`.
 
 ## Licenças e cabeçalhos
 
