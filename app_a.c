@@ -15,6 +15,13 @@
  #include <time.h>
  #include <unistd.h>
  
+ #define VERMELHO "\033[1;31m"
+ #define VERDE "\033[1;32m"
+ #define AMARELO "\033[1;33m"
+ #define CIANO "\033[1;36m"
+ #define NEGRITO "\033[1m"
+ #define RESET "\033[0m"
+ 
  #define LISTEN_PORT 8081
  #define PEER_DEFAULT "172.28.0.3"
  #define PEER_PORT 8082
@@ -53,9 +60,10 @@
      close(ls);
      return 1;
    }
-   printf("[App A] Escutando na porta %d, originando ligação para %s:%d\n",
+   printf("\n" NEGRITO CIANO "╭──────────── APP A | CONTROLE DE MISSÃO ────────────╮" RESET "\n");
+   printf(CIANO "[📡][APP A]" RESET " Escutando porta %d | peer configurado: %s:%d\n",
           LISTEN_PORT, peer, PEER_PORT);
-   fflush(stdout); // Limpa o buffer de impressão
+   fflush(stdout);
  
    int out = -1, inc = -1;
    for (;;) {
@@ -82,8 +90,8 @@
          usleep(1000 * SLEEP_BETWEEN_MS);
          continue;
        }
-       printf("[App A] Ligação de saída para B estabelecida (estado ESTABLISHED)\n");
-       fflush(stdout); // Limpa o buffer de impressão
+       printf(VERDE "[🔗][APP A]" RESET " Canal de saída para APP B estabelecido (ESTABLISHED)\n");
+       fflush(stdout);
      }
      if (inc < 0) {
        int fl = fcntl(ls, F_GETFL, 0);
@@ -100,28 +108,29 @@
        set_keepalive(cfd);
        char ip[64];
        inet_ntop(AF_INET, &c.sin_addr, ip, sizeof(ip));
-       printf("[App A] Aceitou ligação de B desde %s:%d (ESTABLISHED)\n", ip,
+       printf(CIANO "[📥][APP A]" RESET " Canal de entrada aceito de APP B: %s:%d (ESTABLISHED)\n", ip,
               (int)ntohs(c.sin_port));
-       fflush(stdout); // Limpa o buffer de impressão
+       fflush(stdout);
        inc = cfd;
      }
      if (out >= 0 && inc >= 0) {
-       printf(
-           "[App A] As duas ligações ativas. Entrando em recv() bloqueante "
-           "(espera circular de rede)\n");
-       fflush(stdout); // Limpa o buffer de impressão
+       printf(AMARELO NEGRITO "[⏳][APP A] recv() bloqueante ativo - espera circular detectável pelo eBPF\n" RESET);
+       fflush(stdout);
  
        char buf[256];
        ssize_t r = recv(out, buf, sizeof(buf), 0);
        
-       if (r < 0) {
-         perror("\n[App A] recv (saída) quebrado pelo pacote RST");
-       } else if (r == 0) {
-         printf("\n[App A] recv: peer fechou (FIM/SITUAÇÃO: conexão terminada)\n");
+       if (r <= 0) {
+         printf("\n" NEGRITO VERMELHO "╔════════════ INCIDENTE CRÍTICO | APP A ════════════╗" RESET "\n");
+         printf(NEGRITO VERMELHO "[💥] RST RECEBIDO! Conexão interrompida pelo kernel." RESET "\n");
+         printf(NEGRITO AMARELO "[⚡] RCV RETORNANDO -1 (Connection reset by peer)." RESET "\n");
+         printf(NEGRITO VERDE "[✅] DEADLOCK TRATADO! Saindo da espera circular." RESET "\n");
+         printf(NEGRITO CIANO "[🛑] FINALIZANDO PROCESSO COM SEGURANÇA..." RESET "\n");
+         printf(NEGRITO VERMELHO "╚════════════════════════════════════════════════════╝" RESET "\n");
        } else {
-         printf("\n[App A] recv: recebidos %zd bytes (inesperado no cenário de impasse)\n", r);
+         printf("\n" VERDE "[📦][APP A]" RESET " recv: recebidos %zd bytes (inesperado no cenário de impasse)\n", r);
        }
-       fflush(stdout); // Limpa o buffer de impressão
+       fflush(stdout);
        
        if (r <= 0)
          break;
